@@ -14,6 +14,10 @@ def ratecurve_to_discountcurve(ratecurve, n_compound=None):
 
     return discountcurve  
 
+
+
+
+
 def ratecurve_to_forwardcurve(ratecurve, n_compound=None, dt=None):
     if isinstance(ratecurve,pd.DataFrame):
         ratecurve = ratecurve.iloc[:,0]
@@ -28,6 +32,21 @@ def ratecurve_to_forwardcurve(ratecurve, n_compound=None, dt=None):
     forwardcurve = n_compound * (1/(F**(n_compound * dt)) - 1)
     
     return forwardcurve
+
+
+
+
+def discount_to_intrate(discount, maturity, n_compound=None):
+        
+    if n_compound is None:
+        intrate = - np.log(discount) / maturity
+    
+    else:
+        intrate = n_compound * (1/discount**(1/(n_compound * maturity)) - 1)    
+        
+    return intrate
+
+
 
 def interp_curves(data,dt=None, date=None, interp_method='linear',order=None, extrapolate=True):
     if dt is None:
@@ -55,3 +74,14 @@ def plot_interp_curves(curves,plot_contin=True):
             
     plt.legend()
     plt.show()
+
+    
+    
+    
+def price_bond(ytm, T, cpn, cpnfreq=2, face=100, accr_frac=0):
+    ytm_n = ytm/cpnfreq
+    cpn_n = cpn/cpnfreq
+    accr_frac = (T-round(T))*cpnfreq
+    N = T * cpnfreq
+    price = face * ((cpn_n / ytm_n) * (1-(1+ytm_n)**(-N)) + (1+ytm_n)**(-N)) * (1+ytm_n)**(accr_frac)
+    return price
