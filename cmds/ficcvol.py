@@ -30,9 +30,10 @@ def blacks_formula(T,vol,strike,fwd,discount):
 
 def flat_to_forward_vol(curves, freq=None, notional=100):
     
+    dt = curves.index[1] - curves.index[0]
     if freq is None:
-        freq = int(1/(curves.index[1] - curves.index[0]))
-        
+        freq = int(1/dt)
+   
     capcurves = curves[['flat vols']].copy()
 
     for tstep, t in enumerate(capcurves.index):
@@ -41,7 +42,7 @@ def flat_to_forward_vol(curves, freq=None, notional=100):
             capcurves.loc[t,'caplet prices'] = np.nan
             capcurves.loc[t,'fwd vols'] = np.nan
         else:
-            capcurves.loc[t,'cap prices'] = cap_vol_to_price(capcurves.loc[t,'flat vols'], curves.loc[t,'swap rates'], curves.loc[:t,'forwards'], curves.loc[:t,'discounts'])
+            capcurves.loc[t,'cap prices'] = cap_vol_to_price(capcurves.loc[t,'flat vols'], curves.loc[t,'swap rates'], curves.loc[:t,'forwards'], curves.loc[:t,'discounts'], dt=dt)
             capcurves['caplet prices'].loc[t] = capcurves.loc[t,'cap prices'] - capcurves.loc[:tprev,'caplet prices'].sum()
             wrapper = lambda vol: capcurves['caplet prices'].loc[t] - notional * (1/freq) * blacks_formula(tprev, vol, curves.loc[t,'swap rates'], curves.loc[t,'forwards'], curves.loc[t,'discounts'])
             capcurves.loc[t,'fwd vols'] = fsolve(wrapper,capcurves.loc[t,'flat vols'])[0]

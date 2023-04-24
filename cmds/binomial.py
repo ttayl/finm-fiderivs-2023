@@ -3,14 +3,14 @@ import numpy as np
 from scipy.optimize import fsolve
 
 
+
 def format_bintree(df,style='{:.2f}'):
     return df.style.format(style,na_rep='').format_index('{:.2f}',axis=1)
 
 
 def construct_rate_tree(dt,T):
-    timegrid = pd.Series(np.arange(0,T+dt,dt),name='time',index=pd.Index(range(int(T/dt)+1),name='state'))
+    timegrid = pd.Series((np.arange(0,round(T/dt)+1)*dt).round(6),name='time',index=pd.Index(range(round(T/dt)+1),name='state'))
     tree = pd.DataFrame(dtype=float,columns=timegrid,index=timegrid.index)
-    
     return tree
 
 def construct_quotes(maturities,prices):
@@ -48,7 +48,7 @@ def replicating_port(quotes,undertree,derivtree,dt=None,Ncash=100):
 
 
 def bintree_pricing(payoff=None, ratetree=None, undertree=None,cftree=None, pstars=None,timing=None,style='european'):
-    
+        
     if payoff is None:
         payoff = lambda r: payoff_bond(r,dt)
     
@@ -61,7 +61,7 @@ def bintree_pricing(payoff=None, ratetree=None, undertree=None,cftree=None, psta
     if pstars is None:
         pstars = pd.Series(.5, index=undertree.columns)
 
-    if undertree.columns.to_series().diff().std()>1e-8:
+    if undertree.columns.to_series().diff().std()>1e-5:
         display('time grid is unevenly spaced')
     dt = undertree.columns[1]-undertree.columns[0]
 
@@ -167,7 +167,7 @@ def estimate_theta(sigmas,quotes_zeros,dt=None,T=None):
         T = quotes_zeros.index[-2]
 
     ratetree = construct_rate_tree(dt,T)
-    theta = pd.Series(dtype=float, index=ratetree.columns)
+    theta = pd.Series(dtype=float, index=ratetree.columns, name='theta')
     dt = ratetree.columns[1] - ratetree.columns[0]
     
     if type(sigmas) is float:
@@ -182,6 +182,8 @@ def estimate_theta(sigmas,quotes_zeros,dt=None,T=None):
             
             theta.iloc[tsteps] = fsolve(wrapper,.5)[0]
             ratetree.iloc[:,tsteps] = incrementBDTtree(subtree, theta.iloc[tsteps], sigmas.iloc[tsteps]).iloc[:,tsteps]
+            
+            print(f'Completed: {tsteps/len(quotes_zeros.index):.1%}')
             
     return theta, ratetree
 
@@ -225,29 +227,25 @@ def price_callable(quotes, fwdvols, cftree, accinttree, wrapper_bond, payoff_cal
 
 
 
-# def BDTtree(thetas, sigmas, r0=None, bond0=None, dt=None, T=None):
-    
-#     if dt is None:
-#         dt = thetas.index[1] - thetas.index[0]
-    
-#     if T is None:
-#         T = thetas.index[-1]
-    
-#     if bond0 is None:
-#         r0 = -np.log(quotes_zeros.iloc[tsteps]/100)/dt
-        
-    
-#     ztree = rates_to_BDTstates(bdttree)
-    
-#     tprev = 0
-#     ztree = construct_rate_tree(dt,T)
-#     for tsteps, t in enumerate(thetas.index):
-#         if tsteps == 0:
-#             ztree.iloc[tsteps,tsteps] = rates_to_BDTstates(r0)
-#         else:
-#             ztree.iloc[:,tsteps] = ztree.iloc[:,tprev] + thetas.iloc[tprev] * dt + sigmas.iloc[tprev] * np.sqrt(dt)
-#             ztree.iloc[tsteps,tsteps] = ztree.iloc[tprev,tprev] + theta.iloc[tprev] * dt - sigma.iloc[tprev] * np.sqrt(dt)
-    
-#     bdttree = BDTstates_to_rates(ztree)
-    
-#     return bdttree
+def BDTtree(thetas, sigmas, r0=None, px_bond0=None, dt=None, T=None):
+
+    if dt is None:
+        dt = thetas.index[1] - thetas.index[0]
+
+    if T is None:
+        T = thetas.index[-1]
+
+    if r0 is None:
+        r0 = -np.log(px_bond0)/dt
+
+    ztree = construct_rate_tree(dt,T)
+    ztree.iloc[0,0] = rates_to_BDTstates(r0)
+
+    # sigmas is indexed starting at dt, so tsteps is lagged
+    for tsteps, t in enumerate(sigmas.index):
+        ztree.iloc[:,tsteps+1] = ztree.iloc[:,tsteps] + thetas.iloc[tsteps] * dt + sigmas.iloc[tsteps] * np.sqrt(dt)
+        ztree.iloc[tsteps+1,tsteps+1] = ztree.iloc[tsteps,tsteps] + thetas.iloc[tsteps] * dt - sigmas.iloc[tsteps] * np.sqrt(dt)
+            
+    bdttree = BDTstates_to_rates(ztree)
+
+    return bdttree
