@@ -17,13 +17,16 @@ def cap_vol_to_price(flatvol, strike, fwds, discounts, dt=.25, notional=100):
     return capvalue
 
 
-def blacks_formula(T,vol,strike,fwd,discount):
+def blacks_formula(T,vol,strike,fwd,discount=1,isCall=True):
         
     sigT = vol * np.sqrt(T)
     d1 = (1/sigT) * np.log(fwd/strike) + .5*sigT
     d2 = d1-sigT
     
-    val = discount * (fwd * norm.cdf(d1) - strike * norm.cdf(d2))
+    if isCall:
+        val = discount * (fwd * norm.cdf(d1) - strike * norm.cdf(d2))
+    else:
+        val = discount * (strike * norm.cdf(-d2) - fwd * norm.cdf(-d1))
     return val
 
 
