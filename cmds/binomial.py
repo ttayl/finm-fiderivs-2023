@@ -183,7 +183,7 @@ def estimate_theta(sigmas,quotes_zeros,dt=None,T=None):
             theta.iloc[tsteps] = fsolve(wrapper,.5)[0]
             ratetree.iloc[:,tsteps] = incrementBDTtree(subtree, theta.iloc[tsteps], sigmas.iloc[tsteps]).iloc[:,tsteps]
             
-            print(f'Completed: {tsteps/len(quotes_zeros.index):.1%}')
+            #print(f'Completed: {tsteps/len(quotes_zeros.index):.1%}')
             
     return theta, ratetree
 
@@ -204,7 +204,7 @@ def construct_bond_cftree(T, compound, cpn, cpn_freq=2, face=100):
     
     return cftree
 
-def construct_accinttree(cftree, compound, cpn, cpn_freq=2, face=100, cleancall=True):
+def construct_accinttree_old(cftree, compound, cpn, cpn_freq=2, face=100, cleancall=True):
     accinttree = cftree.copy()
     step = int(compound/cpn_freq)
     if cleancall is True:
@@ -213,17 +213,41 @@ def construct_accinttree(cftree, compound, cpn, cpn_freq=2, face=100, cleancall=
     return accinttree
 
 
+def construct_accint(timenodes, freq, cpn, cpn_freq=2, face=100):
 
-def price_callable(quotes, fwdvols, cftree, accinttree, wrapper_bond, payoff_call):
+    mod = freq/cpn_freq
+    cpn_pmnt = face * cpn/cpn_freq
+
+    temp = np.arange(len(timenodes)) % mod
+    # shift to ensure end is considered coupon (not necessarily start)
+    temp = (temp - temp[-1] - 1) % mod
+    temp[temp==0] = mod
+    temp = cpn_pmnt * temp.astype(float)/mod
+
+    accint = pd.Series(temp,index=timenodes)
+
+    return accint
+
+
+
+
+
+
+def price_callable(quotes, fwdvols, cftree, accint, wrapper_bond, payoff_call,cleanstrike=True):
 
     theta, ratetree = estimate_theta(fwdvols,quotes)
     bondtree = bintree_pricing(payoff=wrapper_bond, ratetree=ratetree, cftree= cftree)
-    cleantree = np.maximum(bondtree - accinttree,0)
-    calltree = bintree_pricing(payoff=payoff_call, ratetree=ratetree, undertree= cleantree, style='american')
+    if cleanstrike:
+        cleantree = np.maximum(bondtree.subtract(accint,axis=1),0)
+        undertree = cleantree
+    else:
+        undertree = bondtree
+        
+    calltree = bintree_pricing(payoff=payoff_call, ratetree=ratetree, undertree= undertree, style='american')
     callablebondtree = bondtree - calltree
-    model_price = callablebondtree.loc[0,0]
+    model_price_dirty = callablebondtree.loc[0,0]
 
-    return model_price
+    return model_price_dirty
 
 
 
@@ -249,3 +273,12 @@ def BDTtree(thetas, sigmas, r0=None, px_bond0=None, dt=None, T=None):
     bdttree = BDTstates_to_rates(ztree)
 
     return bdttree
+
+
+
+
+def align_days_interval_to_tree_periods(days,freq):
+    yrs = days / 365.25
+    treeyrs = round(round(yrs * freq)/freq,6)
+
+    return treeyrs

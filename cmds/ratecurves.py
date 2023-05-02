@@ -137,3 +137,49 @@ def ytm(price, T, cpn, cpnfreq=2, face=100, accr_frac=None):
     pv_wrapper = lambda y: price - price_bond(y, T, cpn, cpnfreq=cpnfreq, face=face, accr_frac=accr_frac)
     ytm = fsolve(pv_wrapper,.01)
     return ytm
+
+
+
+
+
+
+
+
+def extract_fedpath(curves,feddates,spotfedrate):
+
+    r0 = spotfedrate
+    
+    tag = [dt.strftime('%Y-%m') for dt in curves['last_tradeable_dt']]
+    curves['date'] = tag
+    curves.reset_index(inplace=True)
+    curves.set_index('date',inplace=True)
+
+    tag = [dt.strftime('%Y-%m') for dt in feddates['meeting dates']]
+    feddates['date'] = tag
+    feddates.set_index('date',inplace=True)
+
+    curves = curves.join(feddates)
+    curves['meeting day'] = [dt.day for dt in curves['meeting dates']]
+    curves['contract days'] = [dt.day for dt in curves['last_tradeable_dt']]
+
+    curves['futures rate'] = (100-curves['px_last'])/100
+    curves.drop(columns=['px_last'],inplace=True)
+    curves['expected fed rate'] = np.nan
+
+    for step, month in enumerate(curves.index[:-1]):
+        if step==0:
+            Eprev = r0
+        else:
+            Eprev = curves['expected fed rate'].iloc[step-1]
+
+        if np.isnan(curves['meeting day'].iloc[step]):
+            curves['expected fed rate'].iloc[step] = Eprev
+        else:
+            if np.isnan(curves['meeting day'].iloc[step+1]):
+                curves['expected fed rate'].iloc[step] = curves['futures rate'].iloc[step+1]
+            else:
+                n = curves['contract days'].iloc[step]
+                m = curves['meeting day'].iloc[step]
+                curves['expected fed rate'].iloc[step] = (n * curves['futures rate'].iloc[step] - m * Eprev)/(n-m)
+                
+    return curves
