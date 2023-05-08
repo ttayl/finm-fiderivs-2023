@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 
-from options import *
-
 from scipy.optimize import fsolve
 from scipy.optimize import minimize
 
