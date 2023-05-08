@@ -17,6 +17,23 @@ def cap_vol_to_price(flatvol, strike, fwds, discounts, dt=.25, notional=100):
     return capvalue
 
 
+
+
+def cap_vol_to_price_rev(flatvol, strike, fwds, discounts, dt=.25, notional=100):
+    T = discounts.index[-1]
+    flatvalues = pd.Series(dtype=float, index=discounts.index, name='flat values')
+    
+    tprev = discounts.index[0]
+    for t in discounts.index[1:]:
+        flatvalues.loc[t] = notional * dt * blacks_formula(tprev, flatvol, strike, fwds, discounts.loc[t])
+        tprev = t
+        
+    capvalue = flatvalues.sum()        
+    return capvalue
+
+
+
+
 def blacks_formula(T,vol,strike,fwd,discount=1,isCall=True):
         
     sigT = vol * np.sqrt(T)
@@ -30,6 +47,61 @@ def blacks_formula(T,vol,strike,fwd,discount=1,isCall=True):
     return val
 
 
+
+
+
+def price_caplet(T_rateset,vol,strike,fwd,discount,freq=4,notional=100):
+    dt = 1/freq
+    price = notional * dt * blacks_formula(T_rateset, vol, strike, fwd, discount)
+    return price
+
+
+
+
+def flat_to_forward_vol_rev(flatvols,strikes,fwds, discounts, freq=None, notional=100, returnCaplets=False):
+#TODO: allow for timegrid to differ from cap timing
+    if freq!=4:
+        display('Warning: freq parameter controls timegrid and cap timing.')
+        
+    dt = 1/freq
+    
+    out = pd.DataFrame(dtype=float, index=flatvols.index, columns=['fwd vols','cap prices'])
+    caplets = pd.DataFrame(dtype=float, index=flatvols.index, columns=strikes.values)
+
+    first_cap = flatvols.index.get_loc(2*dt)
+
+    for step, t in enumerate(flatvols.index):
+        if step < first_cap:
+            out.loc[t,'cap prices'] = np.nan
+            out.loc[t,'fwd vols'] = np.nan
+            tprev = t
+        else:
+            out.loc[t,'cap prices'] = cap_vol_to_price(flatvols.loc[t], strikes.loc[t], fwds.loc[:t], discounts.loc[:t], dt=dt, notional=notional)
+            if step==first_cap:
+                out.loc[t,'fwd vols'] = flatvols.loc[t]
+                caplets.loc[t,strikes.loc[t]] = out.loc[t,'cap prices']
+                tprev = t
+            else:
+                strikeT = strikes.loc[t]
+
+                for j in flatvols.index[first_cap:step]:
+                    caplets.loc[j,strikeT] = price_caplet(j-dt, out.loc[j,'fwd vols'], strikeT, fwds.loc[j], discounts.loc[j],freq=freq, notional=notional)
+
+                caplets.loc[t,strikeT] = out.loc[t,'cap prices'] - caplets.loc[:tprev,strikeT].sum()
+
+                wrapper = lambda vol: caplets.loc[t,strikeT] - price_caplet(tprev, vol, strikeT, fwds.loc[t], discounts.loc[t],freq=freq, notional=notional)
+
+                out.loc[t,'fwd vols'] =  fsolve(wrapper,out.loc[tprev,'fwd vols'])[0]            
+                tprev = t            
+
+    out.insert(0,'flat vols',flatvols)
+    
+    if returnCaplets:
+        return out, caplets
+    else:
+        return out
+    
+    
 
 def flat_to_forward_vol(curves, freq=None, notional=100):
     

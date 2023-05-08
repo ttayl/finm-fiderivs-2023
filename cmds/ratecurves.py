@@ -34,7 +34,10 @@ def ratecurve_to_forwardcurve(ratecurve, n_compound=None, dt=None):
     
     F = discountcurve / discountcurve.shift()
     
-    forwardcurve = n_compound * (1/(F**(n_compound * dt)) - 1)
+    if n_compound is None:
+        display('TODO')
+    else:
+        forwardcurve = n_compound * (1/(F**(n_compound * dt)) - 1)
     
     return forwardcurve
 
@@ -66,7 +69,12 @@ def interp_curves(data,dt=None, date=None, interp_method='linear',order=None, ex
         temp = data.loc[date,:]
 
     newgrid = pd.DataFrame(dtype=float, index=np.arange(dt,temp.index[-1]+dt,dt),columns=['quotes'])
-    newgrid.index = (freq*newgrid.index.values).round(0)/freq
+    # sofr curve last index often 10.02 command above extends to 10+. If barely overruns, toss last value
+    overrun = (temp.index[-1] % dt)/dt
+    if overrun>0 and overrun < .1:
+        newgrid = newgrid.iloc[:-1,:]
+        
+    #newgrid.index = (freq*newgrid.index.values).round(0)/freq
 
     curves = temp.to_frame().rename(columns={temp.name:'quotes'})
     curves = pd.concat([curves,newgrid],axis=0)
@@ -77,6 +85,7 @@ def interp_curves(data,dt=None, date=None, interp_method='linear',order=None, ex
     else:
         curves['interp'].interpolate(method=interp_method, order=order,inplace=True)
     
+    curves = curves.loc[newgrid.index,:]
     curves = curves[~curves.index.duplicated()].sort_index()
     
     return curves
@@ -140,6 +149,35 @@ def ytm(price, T, cpn, cpnfreq=2, face=100, accr_frac=None):
 
 
 
+
+
+def calc_swaprate(discounts,T,freqswap):
+    freqdisc = round(1/discounts.index.to_series().diff().mean())
+    step = round(freqdisc / freqswap)
+    
+    periods_swap = discounts.index.get_loc(T)
+    # get exclusive of left and inclusive of right by shifting both by 1
+    periods_swap += 1
+
+    swaprate = freqswap * (1 - discounts.loc[T])/discounts.iloc[step-1:periods_swap:step].sum()
+    return swaprate
+
+
+
+
+
+def calc_fwdswaprate(discounts, Tfwd, Tswap, freqswap):
+    freqdisc = round(1/discounts.index.to_series().diff().mean())
+    step = round(freqdisc / freqswap)
+    
+    periods_fwd = discounts.index.get_loc(Tfwd)
+    periods_swap = discounts.index.get_loc(Tswap)
+    # get exclusive of left and inclusive of right by shifting both by 1
+    periods_fwd += 1
+    periods_swap += 1
+    
+    fwdswaprate = freqswap * (discounts.loc[Tfwd] - discounts.loc[Tswap]) / discounts.iloc[periods_fwd:periods_swap:step].sum()
+    return fwdswaprate
 
 
 

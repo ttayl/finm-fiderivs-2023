@@ -41,29 +41,48 @@ def zfun(beta, nu, alpha, f, K):
 def chi(z, rho):
     return np.log((np.sqrt(1-2*rho*z + z**2) + z - rho) / (1-rho))
 
+
+
+
 def sabr_slim(beta,nu,rho,f,K,T,volATM):
 
     alpha = solve_alpha(beta, nu, rho, T, volATM, f)
+    
     squareNUM = (((1-beta)**2)/24) * (alpha**2)/((f*K)**(1-beta)) + (1/4) * (rho*beta*nu*alpha)/((f*K)**((1-beta)/2))+((2-3*rho**2)/24)*nu**2
     NUM = alpha * (1 + squareNUM * T)
-
     squareDEN = 1 + (((1-beta)**2)/24) * ((np.log(f/K))**2) + (((1-beta)**4)/1920) * ((np.log(f/K))**4)
     DEN = (f*K)**((1-beta)/2) * squareDEN
-
     z = zfun(beta,nu,alpha,f,K)
     sigmaB = (NUM/DEN) * (z/chi(z,rho))
+        
+    if (type(K) is np.float64) | (type(K) is float):
+        if (f==K):
+            sigmaB = sabrATM(beta,nu,rho,alpha,f,K,T)
+    else:
+        mask = f==K
+        sigmaB[mask] = sabrATM(beta,nu,rho,alpha,f,K[mask],T)
+        
     return sigmaB
 
-def sabr(beta,nu,rho,alpha,f,K,T):
 
+
+
+def sabr(beta,nu,rho,alpha,f,K,T):
+   
     squareNUM = (((1-beta)**2)/24) * (alpha**2)/((f*K)**(1-beta)) + (1/4) * (rho*beta*nu*alpha)/((f*K)**((1-beta)/2))+((2-3*rho**2)/24)*nu**2
     NUM = alpha * (1 + squareNUM * T)
-
     squareDEN = 1 + (((1-beta)**2)/24) * (np.log(f/K)**2) + (((1-beta)**4)/1920) * (np.log(f/K)**4)
     DEN = (f*K)**((1-beta)/2) * squareDEN
-
-    z = zfun(beta,nu,alpha,f,K)
+    z = zfun(beta,nu,alpha,f,K)        
     sigmaB = (NUM/DEN) * (z/chi(z,rho))
+    
+    if (type(K) is np.float64) | (type(K) is float):
+        if f==K:
+            sigmaB = sabrATM(beta,nu,rho,alpha,f,K,T)
+    else:
+        mask = f==K
+        sigmaB[mask] = sabrATM(beta,nu,rho,alpha,f,K[mask],T)
+        
     return sigmaB
 
 

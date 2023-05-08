@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from scipy.optimize import fsolve
-
+from treasury_cmds import compound_rate
 
 
 def format_bintree(df,style='{:.2f}'):
@@ -28,7 +28,13 @@ def payoff_bond(r,dt,facevalue=100):
     price = np.exp(-r * dt) * facevalue
     return price
 
-
+def payoff_swap(r,swaprate,freqswap,ispayer=True,N=100):
+    if ispayer:
+        payoff = N * (r-swaprate) / freqswap 
+    else:
+        payoff = N * (swaprate-r) / freqswap 
+        
+    return payoff
 
 
 
@@ -47,7 +53,7 @@ def replicating_port(quotes,undertree,derivtree,dt=None,Ncash=100):
 
 
 
-def bintree_pricing(payoff=None, ratetree=None, undertree=None,cftree=None, pstars=None,timing=None,style='european'):
+def bintree_pricing_old(payoff=None, ratetree=None, undertree=None,cftree=None, pstars=None,timing=None,style='european'):
         
     if payoff is None:
         payoff = lambda r: payoff_bond(r,dt)
@@ -81,6 +87,66 @@ def bintree_pricing(payoff=None, ratetree=None, undertree=None,cftree=None, psta
                 valuetree.loc[:,t] = np.maximum(valuetree.loc[:,t],payoff(undertree.loc[:,t]) + np.exp(-ratetree.loc[:,t]*dt) * cftree.loc[:,t])
 
     return valuetree
+
+
+
+
+
+
+
+def bintree_pricing(payoff=None, ratetree=None, undertree=None,cftree=None, dt=None, pstars=None, timing=None, cfdelay=False,style='european',Tamerican=0):
+    
+    if payoff is None:
+        payoff = lambda r: 0
+    
+    if undertree is None:
+        undertree = ratetree
+        
+    if cftree is None:
+        cftree = pd.DataFrame(0, index=undertree.index, columns=undertree.columns)
+        
+    if pstars is None:
+        pstars = pd.Series(.5, index=undertree.columns)
+
+    if dt is None:
+        dt = undertree.columns.to_series().diff().mean()
+        dt = undertree.columns[1]-undertree.columns[0]
+    
+    if timing == 'deferred':
+        cfdelay = True
+    
+    if dt<.25 and cfdelay:
+        display('Warning: cfdelay setting only delays by dt.')
+        
+    valuetree = pd.DataFrame(dtype=float, index=undertree.index, columns=undertree.columns)
+
+    for steps_back, t in enumerate(valuetree.columns[-1::-1]):
+        if steps_back==0:                           
+            valuetree[t] = payoff(undertree[t])
+            if cfdelay:
+                valuetree[t] *= np.exp(-ratetree[t]*dt)
+        else:
+            for state in valuetree[t].index[:-1]:
+                val_avg = pstars[t] * valuetree.iloc[state,-steps_back] + (1-pstars[t]) * valuetree.iloc[state+1,-steps_back]
+                
+                if cfdelay:
+                    cf = cftree.loc[state,t]
+                else:                    
+                    cf = cftree.iloc[state,-steps_back]
+                
+                valuetree.loc[state,t] = np.exp(-ratetree.loc[state,t]*dt) * (val_avg + cf)
+
+            if style=='american':
+                if t>= Tamerican:
+                    valuetree.loc[:,t] = np.maximum(valuetree.loc[:,t],payoff(undertree.loc[:,t]))
+        
+    return valuetree
+
+
+
+
+
+
 
 
 
@@ -166,6 +232,11 @@ def estimate_theta(sigmas,quotes_zeros,dt=None,T=None):
     if T is None:
         T = quotes_zeros.index[-2]
 
+    if quotes_zeros.mean() < 1:
+        scale = 1
+    else:
+        scale = 100
+        
     ratetree = construct_rate_tree(dt,T)
     theta = pd.Series(dtype=float, index=ratetree.columns, name='theta')
     dt = ratetree.columns[1] - ratetree.columns[0]
@@ -175,10 +246,10 @@ def estimate_theta(sigmas,quotes_zeros,dt=None,T=None):
 
     for tsteps, t in enumerate(quotes_zeros.index):
         if tsteps==0:
-            ratetree.loc[0,0] = -np.log(quotes_zeros.iloc[tsteps]/100)/dt
+            ratetree.loc[0,0] = -np.log(quotes_zeros.iloc[tsteps]/scale)/dt
         else:
             subtree = ratetree.iloc[:tsteps+1,:tsteps+1]
-            wrapper = lambda theta: incremental_BDT_pricing(subtree, theta, sigmas.iloc[tsteps]).loc[0,0] - quotes_zeros.iloc[tsteps]
+            wrapper = lambda theta: incremental_BDT_pricing(subtree, theta, sigmas.iloc[tsteps]).loc[0,0] - quotes_zeros.iloc[tsteps] * 100 / scale
             
             theta.iloc[tsteps] = fsolve(wrapper,.5)[0]
             ratetree.iloc[:,tsteps] = incrementBDTtree(subtree, theta.iloc[tsteps], sigmas.iloc[tsteps]).iloc[:,tsteps]
@@ -200,9 +271,11 @@ def construct_bond_cftree(T, compound, cpn, cpn_freq=2, face=100):
     
     # final cashflow is accounted for in payoff function
     # drop final period cashflow from cashflow tree
-    cftree = cftree.iloc[:,:-1]
+    cftree = cftree.iloc[:-1,:-1]
     
     return cftree
+
+
 
 def construct_accinttree_old(cftree, compound, cpn, cpn_freq=2, face=100, cleancall=True):
     accinttree = cftree.copy()
@@ -221,12 +294,43 @@ def construct_accint(timenodes, freq, cpn, cpn_freq=2, face=100):
     temp = np.arange(len(timenodes)) % mod
     # shift to ensure end is considered coupon (not necessarily start)
     temp = (temp - temp[-1] - 1) % mod
-    temp[temp==0] = mod
     temp = cpn_pmnt * temp.astype(float)/mod
 
     accint = pd.Series(temp,index=timenodes)
 
     return accint
+
+
+
+def idx_payoff_periods(series_periods, freq_payoffs, freq_periods=None):
+    return ((series_periods * freq_periods) % (freq_periods / freq_payoffs)) ==0
+
+
+def construct_swap_cftree(ratetree, swaprate, freqswap=1, T=None, freq=None, ispayer=True, N=100):
+    cftree = pd.DataFrame(0, index=ratetree.index, columns=ratetree.columns)
+    cftree[ratetree.isna()] = np.nan
+
+    if freq is None:
+        freq = round(1/cftree.columns.to_series().diff().mean())
+    
+    if T is None:
+        T = cftree.columns[-1] + 1/freq
+        
+    mask_swap_dates = idx_payoff_periods(cftree.columns, freqswap, freq)
+    mask_cols = cftree.columns[mask_swap_dates]
+    
+    payoff = lambda r: payoff_swap(r,swaprate,freqswap,ispayer=ispayer,N=100)
+    
+    refratetree = compound_rate(ratetree,None,freqswap)
+    
+    cftree[mask_cols] = payoff(refratetree[mask_cols])
+
+    # final cashflow is accounted for in payoff function
+    # will not impact bintree_pricing, but should drop them for clarity
+    #cftree.iloc[:,-1] = 0
+    
+    return cftree, refratetree
+
 
 
 
