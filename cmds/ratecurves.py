@@ -173,7 +173,7 @@ def calc_fwdswaprate(discounts, Tfwd, Tswap, freqswap):
     periods_fwd = discounts.index.get_loc(Tfwd)
     periods_swap = discounts.index.get_loc(Tswap)
     # get exclusive of left and inclusive of right by shifting both by 1
-    periods_fwd += 1
+    periods_fwd += step
     periods_swap += 1
     
     fwdswaprate = freqswap * (discounts.loc[Tfwd] - discounts.loc[Tswap]) / discounts.iloc[periods_fwd:periods_swap:step].sum()
